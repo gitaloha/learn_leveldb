@@ -1,0 +1,72 @@
+  以前曾经提出一个问题：当一个项目有多个模块，而且每个模块都有一个init函数的时候，有没有一种方法可以自动调用这些函数？结果去CSDN问了一下，结果得到一个半自动的方法：把这些函数放入到一个数组中，然后根据数组长度，循环调用这些数组。但是得到这样一个方法我还是很不满意。
+  这次在分析leveldb代码的时候发现一个另我眼前一亮的方法。非常完美！先看下面的宏定义：
+#define TEST(base,name)                                                 \
+    class TCONCAT(_Test_,name) : public base {              \
+        public:                                                                         \
+        void _Run();                                                                \
+        static void _RunIt() {                                                   \
+            TCONCAT(_Test_,name) t;                                    \
+            t._Run();                                                                 \
+        }                                                                                  \
+   };                                                                                      \
+   bool TCONCAT(_Test_ignored_,name) =                       \
+             ::leveldb::test::RegisterTest(#base, #name，&TCONCAT(_Test_,name)::_RunIt);                                  \
+   void TCONCAT(_Test_,name)::_Run()
+奇怪吧，先不急，看下他是怎么用的：
+TEST(CRC, Values){
+　 ASSERT_EQ(Values(“a”,  1), Values(“foo”, 3));
+}
+看起来TEST像一个函数，上面实际上也是定义一个函数，但是在这个函数之前还有很多事情要做：
+1.先定义一个_Test_Values的base的子类，这个类两个函数，一个成员函数，一个静态函数_RunIt()，而且静态函数_RunIt()作用就是调用成员函数_Run()。
+2.定义了类之后，静态函数_RunIt()就开始了自己的生命周期了，于是开始调用函数RegisterTest()函数把这个函数注册到一个向量中（包括自己的名字）。
+3.后面开始定义成员函数，因为静态函数已经注册了，他主要是调用成员函数，现在只要实现成员函数_Run()就可以大功告成了。而_Run()怎么实现是如何实现的跟特定模块的功能相关，因此，就留给具体应用实现。
+ps：调用RegisterTest函数需要一个返回值，不然编译器会报错。
+
+秉承着这个思想，我们可以实现一个AUTO_RUN的宏。下面这段代码可以实现一段函数的自动加载运行，而不用采用动态库以及半自动的数组了。可以这样做的根本原因有两点：
+1.宏是预处理的。
+2.全局变量赋值的时候可以调用函数。
+#include <iostream>
+using namespace std;
+
+typedef void (*func_t)();
+func_t func_array[100];
+static int func_count = 0;
+
+int register_func(func_t f);
+
+#define TCANCAT(a, b)  a##b
+#define AUTO_RUN(name)	\
+	void TCANCAT(TEST, name)();		\
+	int TCANCAT(ignore, name) = register_func(TCANCAT(TEST, name));	\
+	void TCANCAT(TEST, name)()
+
+AUTO_RUN(__LINE__)
+{
+	cout << __LINE__ << endl;
+}
+
+int main()
+{
+	int j;
+	for(j=0; j<func_count; j++)
+	{
+		func_array[j]();
+	}
+
+	return 0;
+}
+
+int register_func(func_t f)
+{
+	func_array[func_count++]  = f;
+	return 0;
+}
+
+AUTO_RUN(__LINE__)
+{
+	cout << __LINE__ << endl;
+}
+
+程序输出：
+18
+41
