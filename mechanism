@@ -9,3 +9,8 @@ leveldb用一个Compaction来对Immutable MemTable进行dump进硬盘中。一�
 总的来说，就是一个插入操作，写入到内存的MemTable中（快），然后触发Compaction（大）。
 
 二、写、删、改
+leveldb是没有改操作的，改操作可以直接重新写覆盖原理的value或者先delete掉再写。其实啊，写和删都是同样的过程，删除的时候写一个记录，但是这个记录标志是删除，然后后面Compaction的时候就可以把对于删除的kv对删除掉了。所以只要理解写是怎么进行的就OK了。
+根据上面的存储过程，写只能写到MemTable中去。完事啦？写虽然简单，但是还不会简单到这种地步啦，它写到MemTable中去的时候需要采用SkipList进行排序的插入，而且啊，写操作还是需要经过写硬盘的。你想啊，如果只是写MemTable的话，万一机器挂了怎么办？所以啊，为了保证写的一致性，就需要写入硬盘，但是数据不能写入SSTable中啊，怎么办呢？答案是写入log文件中。我们知道log文件都是append写，而且需要在写入MemTable前写入log。所以啊，写操作一共就两步：写硬盘（log），写内存（MemTable）。
+
+三、读
+读可不简单了，leveldb像一个金字塔，写的时候只要把数据堆在金字塔顶端就可以了，但是读数据呢？鬼知道数据在哪儿。虽然level1下面的文件都是依据key有序的。但是这些数据的key对应的value不是唯一的！！比如先写一个（name，Jordan），已经Compaction到level3了，后面又来一个（name，Kobe）在level1中。这是和可能的。所以说，数据读不能随便读，需要从金字塔的顶端开始读，即先在MemTable中读，没有，去Immutable MemTable中，还没有，再去level0中，依次往下读。所以，读速度是不同的，数据埋得越深，速度越慢。当然了，leveldb有cache机制，但是这些细节就不在这里讨论了。
