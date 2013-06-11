@@ -1,0 +1,11 @@
+参考文章：http://www.samecity.com/blog/Index.asp
+这里看下leveldb的工作原理，只谈它在理论上是如何工作的，不谈哪个文件分成几个block，哪个类有什么成员。leveldb是一个存key-value的数据库，那我们只谈以下几个内容：数据怎么存，怎么读，怎么写，怎么删，怎么改。
+
+一、数据怎么存
+数据存储的地方无非是内存和硬盘，要想快肯定存内存，要想大肯定存硬盘。又快又好肯定是先存内存，再存硬盘。leveldb也是遵循这么一个道理，它在内存中存在一个MemTable中，这个MemTable满了之后就变成了Immutable MemTable，然后新建一个MemTable继续接受数据。Immutable MemTable是不可写的，因此只能等待着dump进磁盘了。这里注意到MemTable存储的数据是依据key有序的。
+leveldb用一个Compaction来对Immutable MemTable进行dump进硬盘中。一个Immutable MemTable就dump到一个SStable文件中。数据终于写到硬盘中了吧！但是没完呢，真正的重点才开始呢。
+先说说SStable文件（后缀为.sst），它是分层次的，就是分level啦，所以叫leveldb。为什么要分层呢？原因很多，最后再解释。Immutable MemTable用Compaction这个东西dump下来的.sst文件就是level0的SStable了。当level0的文件数目达到一定的数目的时候就会继续Compaction。这里有一个问题，level0的.sst文件都是从MemTable中直接dump下来的，那么虽然在一个.sst文件中是根据key有序的，但是不同的.sst文件会有重复的key。所以啊，level0的Compaction是：选择一个level0的.sst文件A，在所有level0的文件中查找跟A文件的key有重复的，把所有找到的文件跟level1的sst文件合并。删除参与合并的所有.sst文件，得到level1的.sst文件。
+如果level1的文件数目也超了，那么就进行继续执行Compaction啦，但是这时候没那么复杂了，因为level1中的key不会有重复的key了，因此这时候Compaction的工作就是：选取需要合并的level1中的文件A，在level2中查找所有与level1中有重复key的文件，所有的文件进行多路归并排序，得到新的level2中的.sst文件，删除参与合并的文件。
+总的来说，就是一个插入操作，写入到内存的MemTable中（快），然后触发Compaction（大）。
+
+二、写、删、改
